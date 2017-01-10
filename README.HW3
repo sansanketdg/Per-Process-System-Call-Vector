@@ -1,0 +1,7 @@
+Bitmap values:
+	1	:	OPEN
+	2	:	CLOSE
+	4	:	READ
+	8	:	WRITE
+	16	:	MKDIR
+	32	:	RMDIR

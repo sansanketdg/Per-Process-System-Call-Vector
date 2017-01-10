@@ -1,0 +1,16 @@
+#run this script by typing
+#$ .run_script
+rmmod sys_clone2
+rmmod ioctl_module
+rmmod dynamic_vector
+rmmod vector2
+rmmod vector1
+rm /dev/ioctl_device
+make clean
+make
+mknod /dev/ioctl_device c 23 23
+insmod vector1.ko
+insmod vector2.ko
+insmod dynamic_vector.ko
+insmod ioctl_module.ko
+insmod sys_clone2.ko

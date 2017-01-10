@@ -1,0 +1,313 @@
+------------------README-------------------
+
+
+INTRODUCTION
+=====================================================================
+This objective of our project is to have different syscalls per process 
+as it is useful for various scenarios. Since having a different flavour 
+of a particular syscall helps, we have overridden some syscalls so that
+a particular process can use this particular flavour of the syscall in a 
+particular scenario. We have allowed every process to use from predefined 
+set of vectors or use a default vector, where the default vector contains
+all the syscalls that a process can execute without any custom 
+functionality to a syscall. The predefined vectors contains the flavours
+of the syscalls ie. every vector has a set of overridden syscalls that a 
+process can execute. The syscalls that we have overridden and its flavours
+are mentioned below:
+
+			------------------------------------------
+			| SYSCALL |              FLAVOUR         |
+			------------------------------------------
+			| OPEN    | OPEN_OVERRIDE, OPEN_BLOCKED  |
+			| READ    | READ_OVERRIDE			     |
+			| WRITE   | WRITE_OVERRIDE, WRITE_LOGGED |
+			| CLOSE   | CLOSE_OVERRIDE               | 
+			| LINK    | LINK_OVERRIDE                |
+			| UNLINK  | UNLINK_OVERRIDE              |
+			| MKDIR   | MKDIR_OVERRIDE               |
+			| RMDIR   | RMDIR_OVERRIDE               | 
+			------------------------------------------
+
+We also have implemented creating a vector on the 
+fly ie. apart from the predefined vectors, the user can create a new
+vector for the overriden syscalls of his choice and use it. We have also 
+implemented a new system call which clones the parent process and based
+on the parameters given to this new syscall the child can either inherit
+the vector of the parent or it can get the vector assigned by the user.
+
+
+IMPLEMENTATION
+======================================================================
+This implementation project is divided into the following parts:
+
+1. ADDING A (void *) IN THE task_struct
+========================================
+We have included a void pointer in the task_struct which will store the 
+starting address of the linked list of system calls. This is the 
+overriddenSyscalls_address variable in struct vector which goes to 
+the (void*) of every process.
+
+-------------------------------------------------------------------------
+
+2. IMPLEMENTING VECTORS FOR OVERRIDDEN SYSCALLS
+===============================================
+A vector as defined earlier contains the system calls that a particular
+process can execute. Our default vector contains all the system calls
+defined in the linux kernel without any change in their functionality.
+Now since we have overridden the above syscalls to its corresponding 
+flavours, a custom vector can contain the combination of overridden 
+syscalls and the default syscalls given by the linux kernel. We have
+implemented custom vectors using a linked list implementation of all
+custom vectors. Below is the structure of our vector.
+
+struct struct_vector {
+	unsigned long vector_id;  
+	char vector_name[MAX_VECTOR_NAME_LEN];
+	unsigned long overriddenSyscalls_address;  
+	int refcount;
+	unsigned int overfuncs_bitmap;
+	struct module *vector_module;
+	struct list_head nextVector; /* pointer to next vector*/
+};
+
+In the above structure the overriddenSyscalls_address contains the 
+starting address to the linked list of the overridden syscalls that
+a particular vector implements. Below is the structure of the 
+overridden syscall which contains the system call number of the 
+original system call, the function pointer of overriden syscall that
+we have defined and a pointer to the syscall table.
+
+
+struct overriddenSyscall {
+	int _NR_syscall;
+	sys_call_ptr_t funcPtr;
+	const sys_call_ptr_t *syscallTablePtr;
+	struct overriddenSyscall *nextSyscall;
+};
+
+Initially we have defined two custom vectors which contains the five
+overriden syscalls each. Both of them are loaded as a module. 
+
+-----------------------------------------------------------------------
+
+3. SYS_CLONE2 
+==============
+We have defined a new syscall called sys_clone2 which has the primary 
+objective of assigning the child process with a vector. Based on the
+parameters passed we have made sure the child gets a particular vector.
+Below is the declaration of the of our sys_clone2 syscall.
+
+asmlinkage long sys_clone2(unsigned long flags, void *child_stack,
+                     int *ptid, unsigned long newtls,
+                     int *ctid, unsigned long id);
+
+For the child to inherit the parents vector we have added a new flag 
+called CLONE_SYSCALLS. The parameters in the sys_clone2 mean the 
+following:
+
+flags -> The flags to be passed to sys_clone2. If CLONE_SYSCALLS is 
+		passed then the child get the vector of the parent. If it is
+		passed then the sixth parameter ie. the vector ID passed is
+		assigned to the child. Only SIGCHLD and CLONE_SYSCALLS should 
+		be passed.
+
+child_stack -> this is the child stack that is passed to sys_clone2.
+
+ptid -> this is the parent thread id to be passed to sys_clone2. 
+		Usually this is NULL.
+
+newtls -> This parameter is passed as 0.
+
+ctid -> This is the child thread id passed to sys_clone2. This is also
+		NULL usually.
+
+id -> This is the ID of the vector that will be assigned to the child
+	  if CLONE_SYSCALLS flag is not set. The vector should already be 
+	  present for the child to get the vector assigned.
+
+----------------------------------------------------------------------
+
+4. IOCTL MODULE FUNCTIONALITY
+===============================
+We have used the ioctl system call for implementing specific funtions.
+The functions are the following:
+
+	>IOCTL_SET
+	-----------
+		When this parameter is passed to the ioctl with the vector name
+		for a particular process, the ioctl module sets the process with
+		vector of the vector name passed.
+	>IOCTL_REMOVE
+	-------------
+		When this parameter is passed to the ioctl with the vector name
+		for a particular process, the ioctl module removes the vector 
+		assigned to the process.
+	>IOCTL_SHOW_ALL
+	---------------
+		When this parameter is passed to the ioctl with a user buffer,
+		the user buffer contains all the vectors that are currently 
+		present.
+	>IOCTL_SHOW_MINE
+	----------------
+		When this parameter is passed to the ioctl with a user buffer,
+		the process that calls the ioclt will get vector it is associated
+		with.
+	>IOCTL_VECTOR_FOR_PID
+	---------------------
+		When this parameter is passed to the ioctl with a process ID and
+		a buffer, the buffer contains the vector that a process with the
+		process ID passed is associated with.
+	>IOCTL_CREATE_FROM_BITMAP
+	--------------------------
+		When this parameter is passed to the ioctl with a legitimate bitmap
+		then a process will be able to create a vector. This is the defining
+		feature of our project as we are allowing a process to create a 
+		vector based on which syscalls it wants to override.
+
+-----------------------------------------------------------------------------
+
+5. ******* VECTORS ON THE FLY ***********
+============================================
+
+Apart from the two already existing vectors we have extended the
+functionality of our project to creating vectors on the fly by a
+particular process. This is crucial as we are giving a particular
+process the complete freedom to override whichever system call it
+wants to. This is done through an ioctl call with the parameter
+IOCTL_CREATE_FROM_BITMAP and giving a particular bitmap value. The
+bitmap value can be formed from the following
+
+	-----------------------------------
+	|OVERRIDDEN_SYSCALL | BITMAP_VALUE|
+	-----------------------------------
+	|   READ_OVERRIDE   |      1      |
+	|   WRITE_OVERRIDE  |      2      |
+	|   OPEN_OVERRIDE   |      4      |
+	|   CLOSE_OVERRIDE  |      8      |
+	|   UNLINK_OVERRIDE |      16     |
+	|   LINK_OVERRIDE   |      32     |
+	|   MKDIR_OVERRIDE  |      64     |
+	|   RMDIR_OVERRIDE  |      128    |
+	|   WRITE_LOGGED    |      256    |
+	|   OPEN_BLOCKED    |      512    |
+	-----------------------------------
+
+
+For example a bit map value of 61 will give you the following 
+overriden syscalls in your vector.
+1. READ_OVERRIDE
+2. OPEN_OVERRIDE
+3. CLOSE_OVERRIDE
+4. UNLINK_OVERRIDE
+5. LINK_OVERRIDE
+
+
+OVERRIDDEN SYSCALL FUNCTIONALITY
+======================================================================
+
+1. OPEN_OVERRIDE
+==================
+ The overridden open is a flavour of the system call open, which prints 
+ the name of the process and calls the open function defined in the 
+ linux kernel.
+
+2. OPEN_BLOCKED
+==================
+ This is another overridden open called OPEN_BLOCKED which is another 
+ flavour of the system call open, which prints the process name and does 
+ not let httpd process to access user details ie. open folders /etc/passwd
+ and /etc/shadow which contains user account password and details 
+ respectively. It performs normal open syscall with the exception for 
+ the httpd process.
+
+3. READ_OVERRIDE 
+==================
+ The overriden read is a flavour of the system call read, which prints
+ the name of the process and calls the read function defined in the 
+ linux kernel.
+
+4. WRITE_OVERRIDE 
+==================
+ The overridden write is a flavour of the system call write, which prints
+ the name of the process and calls the write function defined in the 
+ linux kernel.
+
+5. CLOSE_OVERRIDE 
+==================
+ The overridden close is a flavour of the system call close, which prints
+ the name of the process and calls the close function defined in the 
+ linux kernel.
+
+6. UNLINK_OVERRIDE
+================== 
+ The overridden unlink is a flavour of the system call unlink, which 
+ prints the name of the process and calls normal unlink. This overriden
+ syscall has the additional functionality that it wont be able to unlink
+ .protected file. 
+
+7.LINK_OVERRIDE 
+=================
+ The overridden link is a flavour of the system call link, which prints
+ the name of the process and calls the link function defined in the 
+ linux kernel.
+
+8. MKDIR_OVERRIDE
+==================
+ The overridden mkdir is a flavour of the system call mkdir which prints
+ the name of the process and calls the mkdir function defined in the 
+ linux kernel.
+
+9. RMDIR_OVERRIDE 
+=================
+ The overriden rmdir is a flavour of the system call rmdir which prints
+ the name of the process and calls the rmdir function defined in the 
+ linux kernel.
+
+10. WRITE_LOGGED 
+=================
+ This is another overridden write called WRITE_LOGGED which is another
+ flavour of the syscall write, which prints the name of the process and
+ calls normal write. This has an additional functionality that if write
+ is being performed on a .c file, then whatever changes made by a
+ particular user is logged in the .c file by adding the user ID of the
+ user in a commented format for those particular changes. In this flavour
+ of write, we have made sure that file descriptor of a file should be 
+ greater than 2 on whom WRITE_LOGGED is being performed as file descriptors
+ 0,1 and 2 are stdin, stdout and stderr and logging them would result in
+ showing the output for every printk in the dmesg which is a nuisance.
+ We can extend this to .java and other files and also get the uname from
+ the /etc/passwd by using uid.
+
+
+ STEPS TO TEST
+ ======================================================================
+
+ 1. Inside hw3-cse506p17 folder, do 'make' and build the kernel. Once 
+ 	kernel is build, reboot it.
+ 2. Go inside hw3-cse506p17/hw3 folder.
+ 3. Do a 'make' inside this folder.
+ 4. Once all modules are ready, create a device for ioctl call in /dev/
+ 	by issuing this command - 'mknod /dev/ioctl_device c 23 23'
+ 5. Now, create a sample vector by this command - 
+ 	'insmod vector1.ko'
+ 6. Create another sample vector by this command -
+ 	'insmod vector2.ko'
+ 7. Insert another module named 'dynamic_vector.ko' that will handle 
+ 	dynamic vector creation from ioctl sys-call inside a process.
+ 8. Insert 'ioctl_module.ko' modules which will handle all the ioctl
+ 	requests from ioctl(2) syscall from user-code / process.
+ 9. Finally insert the over-ridden clone(2) by executing -
+ 	'insmod sys_clone2.ko' command.
+ 10. Now you are ready to test all the user-codes from demo/ folder in
+ 	hw3/.
+
+
+
+
+
+
+
+
+
+
+

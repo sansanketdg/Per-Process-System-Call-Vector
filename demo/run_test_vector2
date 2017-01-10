@@ -1,0 +1,4 @@
+#Always use this file to run test_vector2
+
+gcc test_vector2.c -o httpd
+./httpd

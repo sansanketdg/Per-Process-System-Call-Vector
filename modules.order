@@ -1,0 +1,5 @@
+kernel//usr/src/hw3-cse506p17/hw3/ioctl_module.ko
+kernel//usr/src/hw3-cse506p17/hw3/vector1.ko
+kernel//usr/src/hw3-cse506p17/hw3/vector2.ko
+kernel//usr/src/hw3-cse506p17/hw3/sys_clone2.ko
+kernel//usr/src/hw3-cse506p17/hw3/dynamic_vector.ko
